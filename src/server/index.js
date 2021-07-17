@@ -10,7 +10,7 @@ const htmlRoute = require('./routes/html');
 const markdownRoute = require('./routes/markdown');
 const convertRoute = require('./routes/convert');
 
-app.use(bodyParser.text({ type: 'text/plain' }));
+app.use(bodyParser.text({ type: 'text/plain', limit: '5mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.resolve(__dirname, '../../public')));
 app.set('views', path.join(__dirname, 'views'));
@@ -51,8 +51,8 @@ app.use((err, req, res, next) => {
     code: err.code || 'unexpected',
     message: err.message || 'Unexpected error',
   };
-  if (err.errors) error.errors = err.errors;
-
+  if (err.detail) error.detail = err.detail;
+  if (err.validationErrors) error.validationErrors = err.validationErrors;
   res.status(500).send(error);
 });
 

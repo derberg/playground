@@ -1,21 +1,50 @@
-<div id="App">
+<div id="App" class="hidden">
   {{> topbar embedded=embedded }}
   {{~> left-pane app='#App' ~}}
   {{> right-pane app='#App' }}
 
-  <div id="convert-dialog" class="hidden">
+  <div id="convert-dialog-older" class="convert-dialog hidden">
     <img src="/img/rocket-launch.png">
-    <h2>Convert to 2.0.0</h2>
-    <p>Your document is using an old version of AsyncAPI. The playground only supports 2.0.0 and above. Convert your
-      document to continue.</p>
+    <h2>Convert to 2.1.0</h2>
+    <p>Your document is using an old version of AsyncAPI. The playground only supports 2.0.0 and above. Convert your document to latest (2.1.0) version to continue.</p>
+    <a 
+      href="https://www.asyncapi.com/blog/release-notes-2.1.0" 
+      target="_blank"
+      rel="nofollow noopener noreferrer"
+    >
+      See the release notes
+    </a>
     <div>
       {{>button button=true class="js-convert" style="margin-left:0;color:white;font-size:16px;padding:10px 15px;font-weight:normal;" text='Convert now' primary=true}}
+    </div>
+  </div>
+  <div id="convert-dialog-2.0.0" class="convert-dialog hidden">
+    <img src="/img/rocket-launch.png">
+    <h2>Convert to 2.1.0</h2>
+    <p>Your document is using an old version of AsyncAPI. Convert your document to latest (2.1.0) version to continue.</p>
+    <a 
+      href="https://www.asyncapi.com/blog/release-notes-2.1.0" 
+      target="_blank"
+      rel="noopener"
+    >
+      See the release notes
+    </a>
+    <div style="display: flex; justify-content: center;">
+      <div>
+        {{>button button=true class="js-skip-convert" style="margin-left:0;color:white;font-size:16px;padding:10px 15px;font-weight:normal;" text='Skip' primary=true}}
+      </div>
+      <div style="margin-left: 16px;">
+        {{>button button=true class="js-convert" style="margin-left:0;color:white;font-size:16px;padding:10px 15px;font-weight:normal;" text='Convert now' primary=true}}
+      </div>
     </div>
   </div>
 </div>
 
 <style>
-#convert-dialog {
+.hidden {
+  display: none;
+}
+.convert-dialog {
   position: fixed;
   left: calc(50% - 240px);
   top: calc(50% - 300px);
@@ -27,18 +56,24 @@
   transition: .5s ease-in-out;
   z-index: 100;
 }
-#convert-dialog.hidden {
+.convert-dialog.hidden {
   top: -800px;
 }
-#convert-dialog img {
+.convert-dialog img {
   margin-top: 20px;
   width: 300px;
 }
-#convert-dialog h2 {
+.convert-dialog h2 {
   margin-top: 0;
 }
-#convert-dialog p {
+.convert-dialog p {
   font-size: 14px;
+  margin-bottom: 20px;
+  color: #777;
+}
+.convert-dialog a {
+  display: inline-block;
+  font-size: 16px;
   margin-bottom: 20px;
   color: #777;
 }
@@ -48,11 +83,25 @@
   window.addEventListener('load', () => {
     const App = document.getElementById('App');
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const templateParam = urlParams.get('template');
+    const readOnlyParam = urlParams.get('readOnly');
+    const asyncApiUrl = urlParams.get('load') || urlParams.get('url');
+
     const state = {
       code: null,
       url: null,
-      template: 'html',
+      template: templateParam === 'markdown' ? 'markdown' : 'html',
     };
+
+    const ONE_DAY = 24 * 60 * 60 * 1000; /* ms */
+
+    function is2_0_0version(code) {
+      if (/('|"|)asyncapi('|"|): ('|"|)2.0.0('|"|)/.test(code)) {
+        return true;
+      }
+      return false;
+    }
 
     function generate() {
       superagent
@@ -64,12 +113,33 @@
         .end((err, res) => {
           if (err) {
             if (res.body && res.body.code === 'old-version') {
-              const convertDialog = document.getElementById('convert-dialog');
+              const convertDialog = document.getElementById('convert-dialog-older');
               convertDialog.classList.remove('hidden');
             } else {
               const errorsEl = document.getElementById('document-errors');
               const errorWrapperEl = document.querySelector('.errors-wrapper');
-              errorsEl.innerHTML = res.body.errors ? JSON.stringify(res.body.errors, null, 2) : res.body.message;
+
+              function getErrorsHTMLFrom(res) {
+                function getErrorMessage(error) {
+                  if (error.location.startLine && error.location.startColumn) {
+                    return `${error.title} at line ${error.location.startLine}, column ${error.location.startColumn}`
+                  }
+                  return `${error.title}`;
+                }
+
+                if (res.body.detail) {
+                  return res.body.detail;
+                }
+
+                if (res.body.validationErrors) {
+                  const errorsSimplified = res.body.validationErrors.map(getErrorMessage);
+                  return JSON.stringify(errorsSimplified, null, 2);
+                }
+
+                return res.body.message;
+              }
+
+              errorsEl.innerHTML = getErrorsHTMLFrom(res);
               errorWrapperEl.classList.remove('errors-wrapper--old-version');
               errorWrapperEl.classList.remove('errors-wrapper--hidden');
             }
@@ -109,8 +179,19 @@
         .catch(console.error);
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const asyncApiUrl = urlParams.get('load') || urlParams.get('url');
+    // If someone pass the `readOnly` query parameter then hide left pane with topbar
+    if (readOnlyParam === '' || readOnlyParam === 'true') {
+      document.querySelector('.{{css.topBar}}').classList.add('hidden');
+      document.querySelector('.{{css.leftPane}}').classList.add('{{css.leftPane}}--collapsed');
+      document.querySelector('.{{css.leftPane}}__collapser').classList.add('hidden');
+      document.querySelector('.{{css.rightPane}}').style.top = 0;
+      document.querySelector('.{{css.rightPane}}__toolbar').classList.add('hidden');
+    }
+    // Show app after updating above styles
+    // thanks to this we avoid the appearance of the editor and topbar for a few milliseconds.
+    // We have to also refresh the CodeMirror container
+    document.querySelector('#App').classList.remove('hidden');
+    document.querySelector('.CodeMirror').CodeMirror.refresh();
 
     if (asyncApiUrl) {
       document.getElementById('fetch-document-url').value = asyncApiUrl;
@@ -123,10 +204,23 @@
     });
 
     App.addEventListener('onCodeChange', (e) => {
-      if (String(e.detail).trim().length) {
+      const trimedCode = String(e.detail).trim();
+      if (trimedCode.length) {
         state.code = e.detail;
         state.url = document.getElementById('fetch-document-url').value;
         generate();
+
+        const nowDate = new Date;
+        let dateOfLastQuestion = nowDate;
+        if (localStorage.getItem('informed-about-v2.1.0')) {
+          dateOfLastQuestion = new Date(localStorage.getItem('informed-about-v2.1.0'));
+        }
+        const shouldShowModal = (nowDate === dateOfLastQuestion) || ((nowDate.getTime() - dateOfLastQuestion.getTime()) > ONE_DAY)
+        if (shouldShowModal && is2_0_0version(trimedCode)) {
+          const convertDialog = document.getElementById('convert-dialog-2.0.0');
+          convertDialog.classList.remove('hidden');
+          localStorage.setItem('informed-about-v2.1.0', nowDate);
+        }
       }
     });
 
@@ -146,26 +240,33 @@
       form.submit();
     });
 
-    document.querySelector('.js-convert').addEventListener('click', function () {
-      superagent
-        .post('/convert')
-        .send(state.code)
-        .set('Accept', 'text/plain')
-        .set('Content-Type', 'text/plain')
-        .end((err, res) => {
-          if (err) {
-            const errorsEl = document.getElementById('document-errors');
-            const errorWrapperEl = document.querySelector('.errors-wrapper');
+    [...(document.querySelectorAll('.js-convert') || [])].map(el => {
+      el.addEventListener('click', function () {
+        superagent
+          .post('/convert')
+          .send(state.code)
+          .set('Accept', 'text/plain')
+          .set('Content-Type', 'text/plain')
+          .end((err, res) => {
+            if (err) {
+              const errorsEl = document.getElementById('document-errors');
+              const errorWrapperEl = document.querySelector('.errors-wrapper');
 
-            errorsEl.innerHTML = res.body.message;
-            errorWrapperEl.classList.remove('errors-wrapper--old-version');
-            errorWrapperEl.classList.remove('errors-wrapper--hidden');
-            return;
-          }
+              errorsEl.innerHTML = res.body.message;
+              errorWrapperEl.classList.remove('errors-wrapper--old-version');
+              errorWrapperEl.classList.remove('errors-wrapper--hidden');
+              return;
+            }
 
-          document.getElementById('convert-dialog').classList.add('hidden');
-          App.dispatchEvent(new CustomEvent('updateCode', { detail: res.text }));
-        });
+            document.getElementById('convert-dialog-older').classList.add('hidden');
+            document.getElementById('convert-dialog-2.0.0').classList.add('hidden');
+            App.dispatchEvent(new CustomEvent('updateCode', { detail: res.text }));
+          });
+      });
+    });
+
+    document.querySelector('.js-skip-convert').addEventListener('click', function () {
+      document.getElementById('convert-dialog-2.0.0').classList.add('hidden');
     });
   });
 </script>
